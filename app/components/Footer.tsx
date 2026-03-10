@@ -4,7 +4,7 @@ export default function Footer() {
   // Configurações de links (depois você pode colocar os reais do cliente)
   const numeroWhatsApp = "5586999999999";
   const linkWhatsApp = `https://wa.me/${numeroWhatsApp}?text=Olá! Vim pelo site da Trevo Eventos e gostaria de mais informações.`;
-  const linkInstagram = "https://instagram.com/trevoeventos"; // Substitua pelo @ real
+  const linkInstagram = "https://www.instagram.com/trevo.eventos/"; // Substitua pelo @ real
 
   return (
     <footer className="bg-[#0a0a0a] border-t border-trevo-gold/20 text-gray-300 py-16 px-6 md:px-12 font-sans">
