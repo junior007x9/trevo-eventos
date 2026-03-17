@@ -15,23 +15,69 @@ export default async function AdminPage() {
   `);
   const pacotes = pacotesReq.rows;
 
-  // 3. Buscando os Leads (Orçamentos do Formulário)
+  // 3. Buscando os Leads (Orçamentos)
   const leadsReq = await turso.execute("SELECT * FROM leads ORDER BY data_criacao DESC");
   const leads = leadsReq.rows;
 
+  // 4. Buscando a Galeria de Fotos
+  const galeriaReq = await turso.execute(`
+    SELECT galeria_eventos.id, galeria_eventos.url_imagem, eventos.titulo as evento_titulo 
+    FROM galeria_eventos 
+    JOIN eventos ON galeria_eventos.evento_id = eventos.id
+    ORDER BY galeria_eventos.id DESC
+  `);
+  const fotos = galeriaReq.rows;
+
+  // 5. Buscando os Itens dos Pacotes
+  const itensReq = await turso.execute(`
+    SELECT itens_pacote.id, itens_pacote.item, pacotes.nome as pacote_nome, eventos.titulo as evento_titulo 
+    FROM itens_pacote 
+    JOIN pacotes ON itens_pacote.pacote_id = pacotes.id 
+    JOIN eventos ON pacotes.evento_id = eventos.id
+    ORDER BY eventos.titulo, pacotes.nome
+  `);
+  const itens = itensReq.rows;
+
   // ==========================================
-  // FUNÇÕES DE SALVAR (SERVER ACTIONS)
+  // FUNÇÕES DE BANCO DE DADOS (SERVER ACTIONS)
   // ==========================================
+  
+  async function deletarLead(formData: FormData) {
+    "use server";
+    const id = formData.get("id") as string;
+    if (!id) return;
+    await turso.execute({ sql: "DELETE FROM leads WHERE id = ?", args: [id] });
+    revalidatePath("/admin");
+  }
+
+  // NOVA: Deletar Foto da Galeria
+  async function deletarFoto(formData: FormData) {
+    "use server";
+    const id = formData.get("id") as string;
+    if (!id) return;
+    await turso.execute({ sql: "DELETE FROM galeria_eventos WHERE id = ?", args: [id] });
+    revalidatePath("/admin"); revalidatePath("/eventos/[slug]", "page");
+  }
+
+  // NOVA: Deletar Item do Pacote
+  async function deletarItem(formData: FormData) {
+    "use server";
+    const id = formData.get("id") as string;
+    if (!id) return;
+    await turso.execute({ sql: "DELETE FROM itens_pacote WHERE id = ?", args: [id] });
+    revalidatePath("/admin"); revalidatePath("/eventos/[slug]", "page");
+  }
+
   async function salvarVideoBanco(url: string, eventoId: string) {
     "use server";
     await turso.execute({ sql: "UPDATE eventos SET video_url = ? WHERE id = ?", args: [url, eventoId] });
-    revalidatePath("/admin"); revalidatePath("/eventos/casamento");
+    revalidatePath("/admin"); revalidatePath("/eventos/[slug]", "page");
   }
 
   async function salvarFotoBanco(url: string, eventoId: string) {
     "use server";
     await turso.execute({ sql: "INSERT INTO galeria_eventos (evento_id, url_imagem) VALUES (?, ?)", args: [eventoId, url] });
-    revalidatePath("/admin"); revalidatePath("/eventos/casamento");
+    revalidatePath("/admin"); revalidatePath("/eventos/[slug]", "page");
   }
 
   async function adicionarItem(formData: FormData) {
@@ -41,7 +87,7 @@ export default async function AdminPage() {
     if (!pacoteId || !novoItem) return;
     
     await turso.execute({ sql: "INSERT INTO itens_pacote (pacote_id, item) VALUES (?, ?)", args: [pacoteId, novoItem] });
-    revalidatePath("/admin"); revalidatePath("/eventos/casamento");
+    revalidatePath("/admin"); revalidatePath("/eventos/[slug]", "page");
   }
 
   return (
@@ -69,7 +115,7 @@ export default async function AdminPage() {
             📋 Novos Orçamentos
             <span className="bg-[#D4AF37] text-black text-sm px-3 py-1 rounded-full">{leads.length}</span>
           </h2>
-          <p className="text-gray-400 mb-8 text-sm">Contatos recebidos pelo site. Clique no botão para chamar no WhatsApp.</p>
+          <p className="text-gray-400 mb-8 text-sm">Contatos recebidos pelo site. Fechou o contrato? Apague o lead para limpar a lista.</p>
           
           {leads.length > 0 ? (
             <div className="overflow-x-auto">
@@ -79,7 +125,7 @@ export default async function AdminPage() {
                     <th className="p-4 font-bold">Nome</th>
                     <th className="p-4 font-bold">Evento</th>
                     <th className="p-4 font-bold">Data</th>
-                    <th className="p-4 font-bold text-right">Ação</th>
+                    <th className="p-4 font-bold text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -88,19 +134,24 @@ export default async function AdminPage() {
                     const dataFormatada = new Date(lead.data_criacao as string).toLocaleDateString('pt-BR');
                     
                     return (
-                      <tr key={lead.id as number} className="border-b border-gray-800/50 hover:bg-white/5 transition-colors">
+                      <tr key={lead.id as number} className="border-b border-gray-800/50 hover:bg-white/5 transition-colors group">
                         <td className="p-4 font-bold text-white text-lg">{lead.nome as string}</td>
                         <td className="p-4 text-[#D4AF37] font-bold tracking-wide uppercase text-sm">{lead.evento as string}</td>
                         <td className="p-4 text-gray-500 text-sm">{dataFormatada}</td>
-                        <td className="p-4 text-right">
+                        <td className="p-4 flex items-center justify-end gap-3">
                           <a 
                             href={`https://wa.me/55${telLimpo}?text=Olá ${lead.nome as string}! Recebemos seu pedido de orçamento para o seu ${lead.evento as string} pela Trevo Eventos.`}
                             target="_blank" rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 bg-[#25D366] hover:bg-[#1ebd5a] text-white font-bold py-2.5 px-5 rounded-xl text-sm transition-transform hover:scale-105 shadow-lg"
+                            className="inline-flex items-center gap-2 bg-[#25D366] hover:bg-[#1ebd5a] text-white font-bold py-2 px-4 rounded-xl text-sm transition-transform hover:scale-105 shadow-lg"
                           >
-                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51a12.8 12.8 0 0 0-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347"/></svg>
-                            Chamar no Zap
+                            Zap
                           </a>
+                          <form action={deletarLead}>
+                            <input type="hidden" name="id" value={lead.id as number} />
+                            <button type="submit" title="Excluir Orçamento" className="inline-flex items-center justify-center bg-red-950/50 hover:bg-red-600 text-red-500 hover:text-white border border-red-900/50 hover:border-red-600 p-2.5 rounded-xl transition-all shadow-lg">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                          </form>
                         </td>
                       </tr>
                     );
@@ -110,32 +161,56 @@ export default async function AdminPage() {
             </div>
           ) : (
             <div className="text-center py-12 border border-dashed border-gray-800 rounded-2xl bg-black/20">
-              <p className="text-gray-500 italic">Nenhum pedido de orçamento ainda. Divulgue o site!</p>
+              <p className="text-gray-500 italic">Nenhum pedido de orçamento pendente. Limpo e organizado!</p>
             </div>
           )}
         </section>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* MÓDULO 2: VÍDEO */}
-          <section className="bg-[#121212] border border-gray-800 p-8 rounded-2xl shadow-lg">
-            <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">🎥 Upload de Vídeo de Fundo</h2>
-            <p className="text-gray-500 text-sm mb-6">Altere o vídeo de fundo de uma página de evento.</p>
-            <ClientUploader tipo="video" eventos={eventos} actionSave={salvarVideoBanco} />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          
+          {/* MÓDULO 2: GERENCIAR VÍDEOS */}
+          <section className="bg-[#121212] border border-gray-800 p-8 rounded-2xl shadow-lg flex flex-col justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">🎥 Alterar Vídeo de Fundo</h2>
+              <p className="text-gray-500 text-sm mb-6">Envie um novo vídeo para o fundo de uma página de evento.</p>
+              <ClientUploader tipo="video" eventos={eventos} actionSave={salvarVideoBanco} />
+            </div>
           </section>
 
-          {/* MÓDULO 3: FOTO */}
+          {/* MÓDULO 3: GERENCIAR GALERIA DE FOTOS */}
           <section className="bg-[#121212] border border-gray-800 p-8 rounded-2xl shadow-lg">
-            <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">🖼️ Upload de Foto para Galeria</h2>
-            <p className="text-gray-500 text-sm mb-6">Adicione novas inspirações para as páginas de eventos.</p>
+            <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">🖼️ Galeria de Fotos</h2>
+            <p className="text-gray-500 text-sm mb-6">Envie novas fotos ou apague as antigas.</p>
+            
             <ClientUploader tipo="foto" eventos={eventos} actionSave={salvarFotoBanco} />
+
+            {fotos.length > 0 && (
+              <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {fotos.map((foto) => (
+                  <div key={foto.id as number} className="relative group rounded-lg overflow-hidden border border-gray-800 h-24">
+                    <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url('${foto.url_imagem as string}')` }}></div>
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-2">
+                      <span className="text-xs text-[#D4AF37] font-bold text-center mb-2 truncate w-full">{foto.evento_titulo as string}</span>
+                      <form action={deletarFoto}>
+                        <input type="hidden" name="id" value={foto.id as number} />
+                        <button type="submit" className="bg-red-600 text-white text-xs px-3 py-1.5 rounded-md hover:bg-red-500 transition-colors font-bold">
+                          Excluir
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         </div>
 
-        {/* MÓDULO 4: ITENS DO PACOTE */}
+        {/* MÓDULO 4: GERENCIAR PACOTES E ITENS */}
         <section className="bg-[#121212] border border-gray-800 p-8 md:p-10 rounded-2xl shadow-lg">
-          <h2 className="text-2xl font-bold text-white mb-2 flex items-center gap-2">✨ Adicionar Benefício ao Pacote</h2>
-          <p className="text-gray-500 text-sm mb-8">Adicione um novo item (ex: Cascata de Chocolate) a um pacote existente.</p>
-          <form action={adicionarItem} className="flex flex-col md:flex-row gap-4">
+          <h2 className="text-2xl font-bold text-white mb-2 flex items-center gap-2">✨ Gerenciar Itens dos Pacotes</h2>
+          <p className="text-gray-500 text-sm mb-8">Adicione um novo item (ex: Cascata de Chocolate) ou apague itens antigos.</p>
+          
+          <form action={adicionarItem} className="flex flex-col md:flex-row gap-4 mb-10 border-b border-gray-800 pb-10">
             <select name="pacote_id" required className="bg-black border border-gray-700 text-white rounded-xl p-4 focus:border-[#D4AF37] outline-none w-full md:w-1/3 transition-colors">
               <option value="">Selecione o Pacote...</option>
               {pacotes.map((pacote) => (
@@ -143,8 +218,40 @@ export default async function AdminPage() {
               ))}
             </select>
             <input type="text" name="item" placeholder="Ex: Fotografia e Filmagem com Drone" required className="bg-black border border-gray-700 text-white rounded-xl p-4 flex-grow focus:border-[#D4AF37] outline-none transition-colors" />
-            <button type="submit" className="bg-white text-black font-extrabold uppercase tracking-widest px-8 py-4 rounded-xl hover:bg-[#D4AF37] hover:text-white transition-all">Salvar</button>
+            <button type="submit" className="bg-white text-black font-extrabold uppercase tracking-widest px-8 py-4 rounded-xl hover:bg-[#D4AF37] hover:text-white transition-all">Salvar Item</button>
           </form>
+
+          {itens.length > 0 && (
+            <div className="overflow-x-auto max-h-96 overflow-y-auto pr-4 custom-scrollbar">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wider sticky top-0 bg-[#121212]">
+                    <th className="p-3 font-bold">Evento / Pacote</th>
+                    <th className="p-3 font-bold">Item Benefício</th>
+                    <th className="p-3 font-bold text-right">Ação</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {itens.map((item) => (
+                    <tr key={item.id as number} className="border-b border-gray-800/50 hover:bg-white/5 transition-colors">
+                      <td className="p-3 text-[#D4AF37] text-sm font-medium">
+                        {item.evento_titulo as string} <span className="text-gray-600 mx-1">/</span> {item.pacote_nome as string}
+                      </td>
+                      <td className="p-3 text-white text-sm">{item.item as string}</td>
+                      <td className="p-3 text-right">
+                        <form action={deletarItem}>
+                          <input type="hidden" name="id" value={item.id as number} />
+                          <button type="submit" title="Excluir Item" className="text-gray-500 hover:text-red-500 transition-colors p-2">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                          </button>
+                        </form>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
       </div>
