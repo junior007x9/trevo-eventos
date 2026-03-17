@@ -2,8 +2,70 @@ import { turso } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import Link from "next/link";
 import ClientUploader from "./ClientUploader";
+import { cookies } from "next/headers"; // A ferramenta de segurança do Next.js
 
 export default async function AdminPage() {
+  // ==========================================
+  // SISTEMA DE SEGURANÇA (LOGIN / LOGOUT)
+  // ==========================================
+  const cookieStore = await cookies();
+  const isAutenticado = cookieStore.get("trevo_admin_auth")?.value === "logado";
+
+  async function fazerLogin(formData: FormData) {
+    "use server";
+    const senha = formData.get("senha") as string;
+    
+    // A SENHA OFICIAL DO PAINEL FICA AQUI (Você pode mudar depois)
+    if (senha === "trevo2024") {
+      const store = await cookies();
+      // Cria um cookie seguro que dura 1 dia
+      store.set("trevo_admin_auth", "logado", { secure: true, httpOnly: true, maxAge: 60 * 60 * 24 });
+    }
+    revalidatePath("/admin");
+  }
+
+  async function fazerLogout() {
+    "use server";
+    const store = await cookies();
+    store.delete("trevo_admin_auth"); // Destrói o carimbo de acesso
+    revalidatePath("/admin");
+  }
+
+  // Se NÃO estiver autenticado, mostra apenas a Tela de Login e bloqueia o resto
+  if (!isAutenticado) {
+    return (
+      <main className="min-h-screen bg-[#0a0a0a] flex items-center justify-center p-4 selection:bg-[#D4AF37] selection:text-black">
+        <form action={fazerLogin} className="bg-[#121212] border border-[#D4AF37]/30 p-10 rounded-3xl shadow-[0_0_40px_rgba(212,175,55,0.1)] max-w-md w-full flex flex-col gap-6 text-center relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-[#D4AF37]/10 rounded-full blur-3xl pointer-events-none"></div>
+          
+          <div className="text-6xl mb-2 animate-bounce" style={{ filter: `drop-shadow(0px 0px 10px rgba(212,175,55,0.5))` }}>🔒</div>
+          <h1 className="text-3xl font-black text-white tracking-tight">Acesso Restrito</h1>
+          <p className="text-gray-400 text-sm">Digite a senha mestra para gerenciar o site da Trevo Eventos.</p>
+          
+          <input 
+            type="password" 
+            name="senha" 
+            placeholder="••••••••" 
+            required 
+            className="bg-black border border-gray-700 text-white rounded-xl p-4 text-center tracking-[0.5em] text-lg focus:border-[#D4AF37] outline-none transition-colors" 
+          />
+          
+          <button type="submit" className="w-full py-4 mt-2 bg-gradient-to-r from-[#D4AF37] to-[#F1D570] text-[#1A1A1A] font-extrabold rounded-xl shadow-[0_10px_30px_rgba(212,175,55,0.3)] hover:scale-[1.02] transition-transform duration-300 uppercase tracking-widest text-sm">
+            Entrar no Painel
+          </button>
+          
+          <Link href="/" className="text-gray-500 hover:text-white transition-colors text-xs font-medium uppercase tracking-widest mt-4">
+            Voltar para o site
+          </Link>
+        </form>
+      </main>
+    );
+  }
+
+  // ==========================================
+  // SE CHEGOU AQUI, A PESSOA ACERTOU A SENHA!
+  // ==========================================
+
   // 1. Buscando Eventos
   const eventosReq = await turso.execute("SELECT id, titulo FROM eventos");
   const eventos = eventosReq.rows;
@@ -22,8 +84,7 @@ export default async function AdminPage() {
   // 4. Buscando a Galeria de Fotos
   const galeriaReq = await turso.execute(`
     SELECT galeria_eventos.id, galeria_eventos.url_imagem, eventos.titulo as evento_titulo 
-    FROM galeria_eventos 
-    JOIN eventos ON galeria_eventos.evento_id = eventos.id
+    FROM galeria_eventos JOIN eventos ON galeria_eventos.evento_id = eventos.id
     ORDER BY galeria_eventos.id DESC
   `);
   const fotos = galeriaReq.rows;
@@ -31,9 +92,7 @@ export default async function AdminPage() {
   // 5. Buscando os Itens dos Pacotes
   const itensReq = await turso.execute(`
     SELECT itens_pacote.id, itens_pacote.item, pacotes.nome as pacote_nome, eventos.titulo as evento_titulo 
-    FROM itens_pacote 
-    JOIN pacotes ON itens_pacote.pacote_id = pacotes.id 
-    JOIN eventos ON pacotes.evento_id = eventos.id
+    FROM itens_pacote JOIN pacotes ON itens_pacote.pacote_id = pacotes.id JOIN eventos ON pacotes.evento_id = eventos.id
     ORDER BY eventos.titulo, pacotes.nome
   `);
   const itens = itensReq.rows;
@@ -41,7 +100,6 @@ export default async function AdminPage() {
   // ==========================================
   // FUNÇÕES DE BANCO DE DADOS (SERVER ACTIONS)
   // ==========================================
-  
   async function deletarLead(formData: FormData) {
     "use server";
     const id = formData.get("id") as string;
@@ -50,7 +108,6 @@ export default async function AdminPage() {
     revalidatePath("/admin");
   }
 
-  // NOVA: Deletar Foto da Galeria
   async function deletarFoto(formData: FormData) {
     "use server";
     const id = formData.get("id") as string;
@@ -59,7 +116,6 @@ export default async function AdminPage() {
     revalidatePath("/admin"); revalidatePath("/eventos/[slug]", "page");
   }
 
-  // NOVA: Deletar Item do Pacote
   async function deletarItem(formData: FormData) {
     "use server";
     const id = formData.get("id") as string;
@@ -85,7 +141,6 @@ export default async function AdminPage() {
     const pacoteId = formData.get("pacote_id") as string;
     const novoItem = formData.get("item") as string;
     if (!pacoteId || !novoItem) return;
-    
     await turso.execute({ sql: "INSERT INTO itens_pacote (pacote_id, item) VALUES (?, ?)", args: [pacoteId, novoItem] });
     revalidatePath("/admin"); revalidatePath("/eventos/[slug]", "page");
   }
@@ -98,11 +153,20 @@ export default async function AdminPage() {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-800 pb-8 gap-4">
           <div>
             <h1 className="text-4xl font-black text-[#D4AF37] tracking-tight">Painel de Controle</h1>
-            <p className="text-gray-400 mt-2 text-lg">Gerencie seus arquivos, pacotes e clientes.</p>
+            <p className="text-gray-400 mt-2 text-lg">Gerencie seus arquivos, pacotes e clientes com segurança.</p>
           </div>
-          <Link href="/" className="px-6 py-3 bg-white text-black hover:bg-[#D4AF37] hover:text-white transition-colors font-bold uppercase tracking-widest text-xs rounded-full shadow-lg">
-            Acessar o Site ➔
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link href="/" className="px-6 py-3 bg-white text-black hover:bg-[#D4AF37] hover:text-white transition-colors font-bold uppercase tracking-widest text-xs rounded-full shadow-lg">
+              Ver o Site ➔
+            </Link>
+            {/* BOTÃO DE SAIR (LOGOUT) */}
+            <form action={fazerLogout}>
+              <button type="submit" className="px-6 py-3 bg-red-950/40 text-red-500 hover:bg-red-600 hover:text-white border border-red-900/50 transition-colors font-bold uppercase tracking-widest text-xs rounded-full shadow-lg flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                Sair
+              </button>
+            </form>
+          </div>
         </div>
 
         {/* ======================================= */}
@@ -167,8 +231,6 @@ export default async function AdminPage() {
         </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          
-          {/* MÓDULO 2: GERENCIAR VÍDEOS */}
           <section className="bg-[#121212] border border-gray-800 p-8 rounded-2xl shadow-lg flex flex-col justify-between">
             <div>
               <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">🎥 Alterar Vídeo de Fundo</h2>
@@ -177,13 +239,10 @@ export default async function AdminPage() {
             </div>
           </section>
 
-          {/* MÓDULO 3: GERENCIAR GALERIA DE FOTOS */}
           <section className="bg-[#121212] border border-gray-800 p-8 rounded-2xl shadow-lg">
             <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">🖼️ Galeria de Fotos</h2>
             <p className="text-gray-500 text-sm mb-6">Envie novas fotos ou apague as antigas.</p>
-            
             <ClientUploader tipo="foto" eventos={eventos} actionSave={salvarFotoBanco} />
-
             {fotos.length > 0 && (
               <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-4">
                 {fotos.map((foto) => (
@@ -193,9 +252,7 @@ export default async function AdminPage() {
                       <span className="text-xs text-[#D4AF37] font-bold text-center mb-2 truncate w-full">{foto.evento_titulo as string}</span>
                       <form action={deletarFoto}>
                         <input type="hidden" name="id" value={foto.id as number} />
-                        <button type="submit" className="bg-red-600 text-white text-xs px-3 py-1.5 rounded-md hover:bg-red-500 transition-colors font-bold">
-                          Excluir
-                        </button>
+                        <button type="submit" className="bg-red-600 text-white text-xs px-3 py-1.5 rounded-md hover:bg-red-500 transition-colors font-bold">Excluir</button>
                       </form>
                     </div>
                   </div>
@@ -205,11 +262,9 @@ export default async function AdminPage() {
           </section>
         </div>
 
-        {/* MÓDULO 4: GERENCIAR PACOTES E ITENS */}
         <section className="bg-[#121212] border border-gray-800 p-8 md:p-10 rounded-2xl shadow-lg">
           <h2 className="text-2xl font-bold text-white mb-2 flex items-center gap-2">✨ Gerenciar Itens dos Pacotes</h2>
-          <p className="text-gray-500 text-sm mb-8">Adicione um novo item (ex: Cascata de Chocolate) ou apague itens antigos.</p>
-          
+          <p className="text-gray-500 text-sm mb-8">Adicione um novo item ou apague itens antigos.</p>
           <form action={adicionarItem} className="flex flex-col md:flex-row gap-4 mb-10 border-b border-gray-800 pb-10">
             <select name="pacote_id" required className="bg-black border border-gray-700 text-white rounded-xl p-4 focus:border-[#D4AF37] outline-none w-full md:w-1/3 transition-colors">
               <option value="">Selecione o Pacote...</option>
